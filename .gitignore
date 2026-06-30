@@ -1,0 +1,20 @@
+# Python env and packages
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+# Logs and databases
+*.log
+*.db
+*.sqlite3
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE configuration
+.vscode/
+.idea/
