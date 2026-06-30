@@ -1,0 +1,61 @@
+:root{
+  --bg:#0d1117; --panel:#161b22; --accent:#3ddc97; --accent2:#ff5e5e; --text:#e6edf3; --muted:#7d8590;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; min-height:100vh; background:radial-gradient(circle at 50% 0%, #1b2330, #0d1117 70%);
+  color:var(--text); font-family:'Segoe UI', Arial, sans-serif;
+  display:flex; flex-direction:column; align-items:center; padding:20px;
+}
+
+header{text-align:center;}
+h1{margin:6px 0 2px; font-size:24px; letter-spacing:1px;}
+.sub{color:var(--muted); font-size:13px; margin-bottom:4px;}
+
+.hud{
+  display:flex; gap:18px; align-items:center; font-size:14px; margin:10px 0;
+  background:var(--panel); padding:8px 16px; border-radius:10px; border:1px solid #30363d;
+}
+.hud b{color:var(--accent);}
+
+.panel{
+  background:var(--panel); border:1px solid #30363d; border-radius:14px; padding:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+}
+.panel.main{width:100%; max-width:1400px;}
+
+canvas{display:block; border-radius:10px; background:#000;}
+#gameCanvas{width:100%; height:auto; aspect-ratio:1280/560;}
+
+.relWrap{position:relative;}
+
+.btn{
+  background:linear-gradient(135deg,var(--accent),#2bb886); color:#04261b; border:none; padding:10px 22px;
+  border-radius:8px; font-weight:700; cursor:pointer; font-size:14px;
+}
+.btn.small{padding:6px 14px; font-size:12px;}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
+
+.status{font-size:12px; color:var(--muted); margin-top:10px; min-height:18px; text-align:center;}
+
+.legend{display:flex; gap:10px; font-size:11px; color:var(--muted); margin-top:10px; flex-wrap:wrap; justify-content:center;}
+.pill{background:#21262d; padding:4px 10px; border-radius:20px;}
+
+.gameover{
+  position:absolute; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column;
+  background:rgba(0,0,0,.7); border-radius:10px; color:#fff;
+}
+.gameover.show{display:flex;}
+.go-title{font-size:24px; font-weight:700;}
+.go-score{margin:6px 0 14px;}
+
+.previewWrap{
+  position:fixed; right:18px; bottom:18px; z-index:50;
+}
+.stage-label{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;}
+#previewCanvas{width:220px; height:294px; background:#0b0e14;}
+
+@media (max-width: 700px){
+  .previewWrap{position:static; margin-top:14px;}
+  #previewCanvas{width:160px; height:214px;}
+}
