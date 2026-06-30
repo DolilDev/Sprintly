@@ -2,27 +2,19 @@
 CAM RUNNER - backend serwera
 -----------------------------
 Przechwytuje obraz z kamery, wykonuje:
-  - detekcję pozy (MediaPipe Pose) -> wykrywanie truchtu, skoku, kucania, przechyłu lewo/prawo
-  - segmentację tła (MediaPipe Selfie Segmentation) -> wycięcie sylwetki użytkownika
-i strumieniuje wyniki (sterowanie grą + obraz osoby bez tła w formacie PNG/base64)
-do przeglądarki przez WebSocket (Flask-SocketIO).
-
-Wymagania (darmowe, działa na CPU, nie wymaga karty NVIDIA):
-    pip install -r requirements.txt
-
-Uruchomienie:
-    python server.py
-
-Następnie otwórz w przeglądarce: http://localhost:5000
+  - detekcję pozy (MediaPipe Pose)
+  - segmentację tła (MediaPipe Selfie Segmentation)
+i strumieniuje wyniki przez WebSocket (Flask-SocketIO).
 """
 
 import base64
 import time
+import threading
 
 import cv2
 import numpy as np
 import mediapipe as mp
-from flask import Flask, render_template
+from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -33,15 +25,18 @@ mp_pose = mp.solutions.pose
 mp_selfie = mp.solutions.selfie_segmentation
 
 pose = mp_pose.Pose(
-    model_complexity=0,        # lekki model = szybciej, działa płynnie na CPU
+    model_complexity=0,
     smooth_landmarks=True,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5,
 )
 segmenter = mp_selfie.SelfieSegmentation(model_selection=1)
 
-CAMERA_INDEX = 0
 FRAME_W, FRAME_H = 640, 480
+
+camera_index = 0
+camera_lock = threading.Lock()
+camera_running = False
 
 # ---------- stan kalibracji / wygładzania pozycji ----------
 state = {
@@ -60,11 +55,21 @@ def reset_calibration():
     state["knee_history"] = []
 
 
+def list_cameras():
+    """Zwraca listę dostępnych kamer jako [{index, name}]."""
+    available = []
+    for i in range(8):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            available.append({"index": i, "name": f"Kamera {i}"})
+            cap.release()
+    return available
+
+
 def analyze_pose(landmarks):
-    """Zwraca słownik z gestami sterującymi grą na podstawie landmarków pozy."""
-    ls, rs = landmarks[11], landmarks[12]   # ramiona
-    lh, rh = landmarks[23], landmarks[24]   # biodra
-    lk, rk = landmarks[25], landmarks[26]   # kolana
+    ls, rs = landmarks[11], landmarks[12]
+    lh, rh = landmarks[23], landmarks[24]
+    lk, rk = landmarks[25], landmarks[26]
 
     shoulder_x = (ls.x + rs.x) / 2
     hip_y = (lh.y + rh.y) / 2
@@ -76,7 +81,6 @@ def analyze_pose(landmarks):
     if state["base_hip_y"] is None:
         state["base_hip_y"] = hip_y
 
-    # wygładzanie EMA
     state["shoulder_x_ema"] = state["shoulder_x_ema"] * 0.7 + shoulder_x * 0.3
     state["hip_y_ema"] = state["hip_y_ema"] * 0.7 + hip_y * 0.3
 
@@ -112,8 +116,7 @@ def analyze_pose(landmarks):
 
 
 def cutout_person(frame_bgr, seg_result):
-    """Zwraca obraz BGRA z przezroczystym tłem tam, gdzie nie ma osoby."""
-    mask = seg_result.segmentation_mask  # wartości 0..1
+    mask = seg_result.segmentation_mask
     condition = mask > 0.5
     bgra = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
     bgra[:, :, 3] = (condition * 255).astype(np.uint8)
@@ -128,23 +131,27 @@ def encode_png_base64(bgra_image):
 
 
 def camera_loop():
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+    global camera_running
+    with camera_lock:
+        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
 
     if not cap.isOpened():
-        print("Nie udalo sie otworzyc kamery o indeksie", CAMERA_INDEX)
+        socketio.emit("error", {"msg": f"Nie można otworzyć kamery {camera_index}"})
+        camera_running = False
         return
 
-    print("Kamera uruchomiona. Stream startuje...")
+    print(f"Kamera {camera_index} uruchomiona. Stream startuje...")
+    camera_running = True
 
-    while True:
+    while camera_running:
         ok, frame = cap.read()
         if not ok:
             socketio.sleep(0.05)
             continue
 
-        frame = cv2.flip(frame, 1)  # efekt lustra
+        frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         pose_result = pose.process(rgb)
@@ -159,25 +166,29 @@ def camera_loop():
             bgra = cutout_person(frame, seg_result)
             cutout_b64 = encode_png_base64(bgra)
 
-        socketio.emit(
-            "frame_update",
-            {
-                "gesture": gesture,
-                "cutout": cutout_b64,
-            },
-        )
+        socketio.emit("frame_update", {"gesture": gesture, "cutout": cutout_b64})
+        socketio.sleep(0.03)
 
-        socketio.sleep(0.03)  # ~30 fps
+    cap.release()
+    camera_running = False
+    print(f"Kamera {camera_index} zatrzymana.")
 
+
+# ---------- Endpointy ----------
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
+@app.route("/api/cameras")
+def api_cameras():
+    return jsonify(list_cameras())
+
+
 @socketio.on("connect")
 def on_connect():
-    print("Klient polaczony, kalibruje pozycje bazowa...")
+    print("Klient połączony.")
     reset_calibration()
 
 
@@ -186,10 +197,20 @@ def on_recalibrate():
     reset_calibration()
 
 
-def start_background_camera():
-    socketio.start_background_task(camera_loop)
+@socketio.on("start_camera")
+def on_start_camera(data):
+    global camera_index, camera_running
+    idx = int(data.get("index", 0))
+    camera_index = idx
+    reset_calibration()
+    if not camera_running:
+        socketio.start_background_task(camera_loop)
+    else:
+        # zatrzymaj starą pętlę i poczekaj chwilę, potem uruchom nową
+        camera_running = False
+        socketio.sleep(0.3)
+        socketio.start_background_task(camera_loop)
 
 
 if __name__ == "__main__":
-    start_background_camera()
     socketio.run(app, host="0.0.0.0", port=5000, debug=False)

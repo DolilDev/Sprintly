@@ -2,46 +2,69 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<title>Cam Runner</title>
+<title>Sprintly</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-<header>
-  <h1>🏃 CAM RUNNER</h1>
-  <p class="sub">Steruj ciałem przed kamerką: trucht = bieg, przechył w bok = zmiana pasa, przysiad = kucanie, podskok = skok</p>
-</header>
+<!-- ===== EKRAN STARTOWY ===== -->
+<div id="startScreen">
+  <div class="start-box">
+    <div class="logo">🏃 SPRINTLY</div>
+    <p class="start-sub">Steruj ciałem przed kamerką</p>
 
-<div class="hud">
-  <span>Wynik: <b id="score">0</b></span>
-  <span>Rekord: <b id="best">0</b></span>
-  <span>Status: <b id="poseStatus">--</b></span>
-  <button id="recalBtn" class="btn small">Rekalibruj pozycję</button>
-</div>
+    <div class="cam-select-wrap">
+      <label for="camSelect">Wybierz kamerę:</label>
+      <div class="cam-row">
+        <select id="camSelect"><option value="0">Szukam kamer...</option></select>
+        <button class="btn small" id="refreshCams">↻</button>
+      </div>
+    </div>
 
-<main class="panel main">
-  <div class="relWrap">
-    <canvas id="gameCanvas" width="1280" height="560"></canvas>
-    <div class="gameover" id="gameOverOverlay">
-      <div class="go-title">💥 KONIEC GRY</div>
-      <div class="go-score">Wynik: <span id="finalScore">0</span></div>
-      <button class="btn" id="restartBtn">Zagraj ponownie</button>
+    <button class="btn big" id="startBtn">Uruchom grę</button>
+
+    <div class="start-legend">
+      <span class="pill">⬅️➡️ pasy</span>
+      <span class="pill">⬆️ skok</span>
+      <span class="pill">⬇️ przysiad</span>
+      <span class="pill">🏃 trucht = bieg</span>
     </div>
   </div>
-</main>
-
-<div class="status" id="statusMsg">Łączenie z serwerem Python...</div>
-
-<div class="legend">
-  <span class="pill">⬅️➡️ pasy</span>
-  <span class="pill">⬆️ skok</span>
-  <span class="pill">⬇️ kucnięcie</span>
-  <span class="pill">🏃 trucht = ruch</span>
 </div>
 
-<div class="previewWrap panel">
-  <div class="stage-label">Ty bez tła (z serwera Python)</div>
-  <canvas id="previewCanvas" width="220" height="294"></canvas>
+<!-- ===== WIDOK GRY (fullscreen) ===== -->
+<div id="gameScreen" class="hidden">
+
+  <!-- HUD nakładka na canvas -->
+  <div class="hud-overlay">
+    <span>Wynik: <b id="score">0</b></span>
+    <span>Rekord: <b id="best">0</b></span>
+    <span id="poseStatus" class="pose-badge">--</span>
+    <button class="btn small" id="recalBtn">Rekalibruj</button>
+    <button class="btn small" id="fsBtn">⛶ Fullscreen</button>
+    <button class="btn small danger" id="exitBtn">✕ Wyjdź</button>
+  </div>
+
+  <!-- Główny canvas gry -->
+  <canvas id="gameCanvas" width="1920" height="1080"></canvas>
+
+  <!-- Game over overlay -->
+  <div class="gameover" id="gameOverOverlay">
+    <div class="go-title">💥 KONIEC GRY</div>
+    <div class="go-score">Wynik: <span id="finalScore">0</span></div>
+    <button class="btn big" id="restartBtn">Zagraj ponownie</button>
+    <button class="btn small mt" id="menuBtn">← Menu</button>
+  </div>
+
+  <!-- Podgląd kamery (prawy dolny róg) -->
+  <div class="previewWrap">
+    <div class="stage-label">Ty w grze</div>
+    <canvas id="previewCanvas" width="240" height="320"></canvas>
+  </div>
+
+  <!-- Status połączenia -->
+  <div class="status-bar" id="statusMsg">Łączenie...</div>
+
 </div>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>

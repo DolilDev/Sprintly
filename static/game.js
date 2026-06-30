@@ -1,125 +1,167 @@
-// ====== CAM RUNNER - frontend ======
-// Cala detekcja pozy i segmentacja tla dzieje sie w Pythonie (server.py).
-// Ten plik tylko: laczy sie przez WebSocket, rysuje gre i podglad.
+// ====== SPRINTLY - frontend ======
 
 const socket = io();
 
-const gameCanvas = document.getElementById('gameCanvas');
-const gctx = gameCanvas.getContext('2d');
-const previewCanvas = document.getElementById('previewCanvas');
-const pctx = previewCanvas.getContext('2d');
-
-const statusMsg = document.getElementById('statusMsg');
-const scoreEl = document.getElementById('score');
-const bestEl = document.getElementById('best');
-const poseStatusEl = document.getElementById('poseStatus');
-const gameOverOverlay = document.getElementById('gameOverOverlay');
-const finalScoreEl = document.getElementById('finalScore');
-const restartBtn = document.getElementById('restartBtn');
-const recalBtn = document.getElementById('recalBtn');
+// --- Elementy DOM ---
+const startScreen       = document.getElementById('startScreen');
+const gameScreen        = document.getElementById('gameScreen');
+const camSelect         = document.getElementById('camSelect');
+const refreshCamsBtn    = document.getElementById('refreshCams');
+const startBtn          = document.getElementById('startBtn');
+const gameCanvas        = document.getElementById('gameCanvas');
+const gctx              = gameCanvas.getContext('2d');
+const previewCanvas     = document.getElementById('previewCanvas');
+const pctx              = previewCanvas.getContext('2d');
+const scoreEl           = document.getElementById('score');
+const bestEl            = document.getElementById('best');
+const poseStatusEl      = document.getElementById('poseStatus');
+const gameOverOverlay   = document.getElementById('gameOverOverlay');
+const finalScoreEl      = document.getElementById('finalScore');
+const restartBtn        = document.getElementById('restartBtn');
+const menuBtn           = document.getElementById('menuBtn');
+const recalBtn          = document.getElementById('recalBtn');
+const fsBtn             = document.getElementById('fsBtn');
+const exitBtn           = document.getElementById('exitBtn');
+const statusMsg         = document.getElementById('statusMsg');
 
 let cutoutImg = new Image();
 let cutoutReady = false;
-
 let gesture = { lane: 0, crouching: false, jump: false, running: false };
 
-// ---------- Stan gry ----------
-const game = {
-  lane: 0,
-  playerX: 0,
-  jumpVel: 0,
-  jumpY: 0,
-  isJumping: false,
-  isCrouching: false,
-  speed: 6,
-  distance: 0,
-  score: 0,
-  best: Number(localStorage.getItem('camRunnerBest') || 0),
-  obstacles: [],
-  spawnTimer: 0,
-  alive: true,
-  running: false
-};
-bestEl.textContent = game.best;
-
-function resetGame() {
-  game.lane = 0;
-  game.playerX = 0;
-  game.jumpVel = 0;
-  game.jumpY = 0;
-  game.isJumping = false;
-  game.isCrouching = false;
-  game.speed = 6;
-  game.distance = 0;
-  game.score = 0;
-  game.obstacles = [];
-  game.spawnTimer = 0;
-  game.alive = true;
-  gameOverOverlay.classList.remove('show');
+// --- Wczytaj listę kamer ---
+async function loadCameras() {
+  camSelect.innerHTML = '<option value="">Ładuję...</option>';
+  try {
+    const res = await fetch('/api/cameras');
+    const cams = await res.json();
+    if (cams.length === 0) {
+      camSelect.innerHTML = '<option value="0">Brak wykrytych kamer (spróbuj 0)</option>';
+    } else {
+      camSelect.innerHTML = cams.map(c =>
+        `<option value="${c.index}">${c.name}</option>`
+      ).join('');
+    }
+  } catch {
+    camSelect.innerHTML = '<option value="0">Kamera 0 (domyślna)</option>';
+  }
 }
 
-function spawnObstacle() {
-  const lanes = [-1, 0, 1];
-  const lane = lanes[Math.floor(Math.random() * 3)];
-  const types = ['low', 'high', 'full'];
-  const type = types[Math.floor(Math.random() * types.length)];
-  game.obstacles.push({ lane, z: 1400, type, passed: false });
-}
+refreshCamsBtn.addEventListener('click', loadCameras);
+loadCameras();
 
-// ---------- Odbieranie danych z serwera Python ----------
-socket.on('connect', () => {
-  statusMsg.textContent = 'Połączono z serwerem. Stań w kadrze kamery, zacznij truchtać.';
+// --- Start gry ---
+startBtn.addEventListener('click', () => {
+  const camIdx = parseInt(camSelect.value) || 0;
+  socket.emit('start_camera', { index: camIdx });
+  startScreen.classList.add('hidden');
+  gameScreen.classList.remove('hidden');
   resetGame();
 });
 
+// --- Fullscreen ---
+fsBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    gameScreen.requestFullscreen().catch(err => console.warn('Fullscreen error:', err));
+  } else {
+    document.exitFullscreen();
+  }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  fsBtn.textContent = document.fullscreenElement ? '⛶ Wyjdź z fullscreen' : '⛶ Fullscreen';
+});
+
+// --- Wyjście do menu ---
+exitBtn.addEventListener('click', goToMenu);
+menuBtn.addEventListener('click', goToMenu);
+
+function goToMenu() {
+  gameScreen.classList.add('hidden');
+  startScreen.classList.remove('hidden');
+  if (document.fullscreenElement) document.exitFullscreen();
+}
+
+// --- Socket ---
+socket.on('connect', () => {
+  statusMsg.textContent = 'Połączono z serwerem. Stań przed kamerą i zacznij truchtać.';
+});
 socket.on('disconnect', () => {
-  statusMsg.textContent = 'Rozłączono z serwerem Python. Sprawdź, czy server.py wciąż działa.';
+  statusMsg.textContent = 'Rozłączono z serwerem Python.';
+});
+socket.on('error', (data) => {
+  statusMsg.textContent = 'Błąd: ' + (data.msg || '?');
 });
 
 socket.on('frame_update', (data) => {
   gesture = data.gesture || gesture;
 
   if (data.cutout) {
+    cutoutImg = new Image();
     cutoutImg.onload = () => { cutoutReady = true; };
     cutoutImg.src = 'data:image/png;base64,' + data.cutout;
   }
 
   if (gesture.jump && !game.isJumping && game.alive) {
     game.isJumping = true;
-    game.jumpVel = 13;
+    game.jumpVel = 18;
   }
-  game.lane = gesture.lane;
+  game.lane      = gesture.lane;
   game.isCrouching = gesture.crouching;
-  game.running = gesture.running;
+  game.running   = gesture.running;
 
   poseStatusEl.textContent =
     (game.isCrouching ? 'KUCASZ ' : '') +
-    (game.isJumping ? 'SKOK ' : '') +
-    (game.running ? 'BIEG' : 'STÓJ');
+    (game.isJumping   ? 'SKOK '   : '') +
+    (game.running     ? 'BIEG'    : 'STÓJ');
 });
 
-recalBtn.addEventListener('click', () => {
-  socket.emit('recalibrate');
-  statusMsg.textContent = 'Skalibrowano pozycję bazową na nowo.';
-});
+recalBtn.addEventListener('click', () => { socket.emit('recalibrate'); });
 
-// ---------- Logika gry ----------
+// ===== LOGIKA GRY =====
+const game = {
+  lane: 0, playerX: 0,
+  jumpVel: 0, jumpY: 0, isJumping: false,
+  isCrouching: false, running: false,
+  speed: 6, distance: 0, score: 0,
+  best: Number(localStorage.getItem('sprintlyBest') || 0),
+  obstacles: [], spawnTimer: 0, alive: true,
+};
+bestEl.textContent = game.best;
+
+function resetGame() {
+  Object.assign(game, {
+    lane: 0, playerX: 0, jumpVel: 0, jumpY: 0,
+    isJumping: false, isCrouching: false,
+    speed: 6, distance: 0, score: 0,
+    obstacles: [], spawnTimer: 0, alive: true,
+  });
+  gameOverOverlay.classList.remove('show');
+  cutoutReady = false;
+}
+
+function spawnObstacle() {
+  const lanes = [-1, 0, 1];
+  const types = ['low', 'high', 'full'];
+  game.obstacles.push({
+    lane: lanes[Math.floor(Math.random() * 3)],
+    z: 1600,
+    type: types[Math.floor(Math.random() * 3)],
+    passed: false,
+  });
+}
+
 function updateGame() {
   if (!game.alive) return;
 
-  const targetLaneX = game.lane * 140;
-  game.playerX += (targetLaneX - game.playerX) * 0.25;
+  game.playerX += (game.lane * 160 - game.playerX) * 0.22;
 
   if (game.isJumping) {
     game.jumpY += game.jumpVel;
-    game.jumpVel -= 1.1;
-    if (game.jumpY <= 0) {
-      game.jumpY = 0;
-      game.isJumping = false;
-    }
+    game.jumpVel -= 1.3;
+    if (game.jumpY <= 0) { game.jumpY = 0; game.isJumping = false; }
   }
 
-  game.speed = 6 + Math.min(10, game.distance / 600);
+  game.speed = 6 + Math.min(12, game.distance / 500);
 
   if (game.running) {
     game.distance += game.speed;
@@ -129,20 +171,20 @@ function updateGame() {
   game.spawnTimer -= game.speed;
   if (game.spawnTimer <= 0) {
     spawnObstacle();
-    game.spawnTimer = 480 - Math.min(260, game.distance / 12);
+    game.spawnTimer = 500 - Math.min(280, game.distance / 10);
   }
 
   for (const ob of game.obstacles) {
     if (game.running) ob.z -= game.speed * 4;
   }
-  game.obstacles = game.obstacles.filter(ob => ob.z > -100);
+  game.obstacles = game.obstacles.filter(ob => ob.z > -120);
 
   for (const ob of game.obstacles) {
-    if (ob.z < 60 && ob.z > -20 && !ob.passed) {
+    if (ob.z < 70 && ob.z > -30 && !ob.passed) {
       if (ob.lane === game.lane) {
-        let safe = false;
-        if (ob.type === 'low' && game.isCrouching) safe = true;
-        if (ob.type === 'high' && game.jumpY > 40) safe = true;
+        const safe =
+          (ob.type === 'low'  && game.isCrouching) ||
+          (ob.type === 'high' && game.jumpY > 50);
         if (!safe) gameOver();
       }
       ob.passed = true;
@@ -156,103 +198,120 @@ function gameOver() {
   game.alive = false;
   if (game.score > game.best) {
     game.best = game.score;
-    localStorage.setItem('camRunnerBest', game.best);
+    localStorage.setItem('sprintlyBest', game.best);
+    bestEl.textContent = game.best;
   }
-  bestEl.textContent = game.best;
   finalScoreEl.textContent = game.score;
   gameOverOverlay.classList.add('show');
 }
 
-// ---------- Rysowanie gry ----------
-function laneScreenX(lane, depth, w) {
-  const spread = (w * 0.22) * (1 - depth * 0.85);
-  const cx = w / 2;
-  return cx + lane * spread;
+restartBtn.addEventListener('click', resetGame);
+
+// ===== RYSOWANIE GRY =====
+function laneX(lane, depth, w) {
+  return w / 2 + lane * (w * 0.14) * (1 - depth * 0.82);
 }
 
 function drawGame() {
   const w = gameCanvas.width, h = gameCanvas.height;
-  const grad = gctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#1b2a4a');
-  grad.addColorStop(0.45, '#3a5f8a');
-  grad.addColorStop(0.46, '#444');
-  grad.addColorStop(1, '#1a1a1a');
-  gctx.fillStyle = grad;
-  gctx.fillRect(0, 0, w, h);
-
-  const horizon = h * 0.4;
+  const horizon = h * 0.38;
   const cx = w / 2;
 
-  gctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  gctx.lineWidth = 2;
-  for (const off of [-0.5, 0.5, -1.5, 1.5]) {
+  // Tło
+  const sky = gctx.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#0d1829');
+  sky.addColorStop(1, '#1e4d7a');
+  gctx.fillStyle = sky;
+  gctx.fillRect(0, 0, w, horizon);
+
+  const road = gctx.createLinearGradient(0, horizon, 0, h);
+  road.addColorStop(0, '#2a2a2a');
+  road.addColorStop(1, '#111');
+  gctx.fillStyle = road;
+  gctx.fillRect(0, horizon, w, h - horizon);
+
+  // Linie toru
+  gctx.lineWidth = 3;
+  gctx.strokeStyle = 'rgba(255,255,255,.2)';
+  for (const off of [-1.5, -0.5, 0.5, 1.5]) {
     gctx.beginPath();
-    gctx.moveTo(cx + off * w * 0.18, h);
-    gctx.lineTo(cx + off * 10, horizon);
+    gctx.moveTo(cx + off * w * 0.015, horizon);
+    gctx.lineTo(cx + off * w * 0.22, h);
     gctx.stroke();
   }
 
-  const t = (game.distance * 0.5) % 60;
-  for (let i = 0; i < 8; i++) {
-    const depth = (i * 60 + t) / 480;
+  // Animowane linie ruchu
+  const t = (game.distance * 0.4) % 80;
+  for (let i = 0; i < 10; i++) {
+    const depth = (i * 80 + t) / 800;
     const y = horizon + depth * (h - horizon);
-    gctx.strokeStyle = `rgba(255,255,255,${0.15 * (1 - depth)})`;
+    gctx.strokeStyle = `rgba(255,255,255,${0.12 * (1 - depth)})`;
+    gctx.lineWidth = 1;
     gctx.beginPath();
-    gctx.moveTo(cx - w * 0.17 * (1 - depth * 0.8), y);
-    gctx.lineTo(cx + w * 0.17 * (1 - depth * 0.8), y);
+    gctx.moveTo(cx - w * 0.22 * depth, y);
+    gctx.lineTo(cx + w * 0.22 * depth, y);
     gctx.stroke();
   }
 
+  // Przeszkody
   for (const ob of game.obstacles) {
-    const depth = Math.max(0, Math.min(1, ob.z / 1400));
+    const depth = Math.max(0, Math.min(1, ob.z / 1600));
     const y = horizon + (1 - depth) * (h - horizon);
-    const x = laneScreenX(ob.lane, depth, w);
-    const scale = (1 - depth) * 1.0 + 0.08;
-    const size = 70 * scale;
+    const x = laneX(ob.lane, depth, w);
+    const scale = (1 - depth) + 0.06;
+    const sw = 100 * scale, sh = 100 * scale;
 
     gctx.save();
     if (ob.type === 'low') {
       gctx.fillStyle = '#ff5e5e';
-      gctx.fillRect(x - size / 2, y - size * 0.4, size, size * 0.4);
+      gctx.beginPath();
+      gctx.roundRect(x - sw / 2, y - sh * 0.4, sw, sh * 0.4, 6);
+      gctx.fill();
     } else if (ob.type === 'high') {
       gctx.fillStyle = '#ffb347';
-      gctx.fillRect(x - size / 2, y - size * 1.3, size, size * 0.5);
-      gctx.fillStyle = 'rgba(255,179,71,0.4)';
-      gctx.fillRect(x - size / 2, y - size * 0.8, size, size * 0.4);
+      gctx.fillRect(x - sw / 2, y - sh * 1.3, sw, sh * 0.45);
+      gctx.fillStyle = 'rgba(255,179,71,.35)';
+      gctx.fillRect(x - sw / 2, y - sh * 0.85, sw, sh * 0.45);
     } else {
       gctx.fillStyle = '#3ddc97';
-      gctx.fillRect(x - size / 2, y - size, size, size);
+      gctx.beginPath();
+      gctx.roundRect(x - sw / 2, y - sh, sw, sh, 8);
+      gctx.fill();
     }
     gctx.restore();
   }
 
+  // Gracz (sylwetka jeśli jest cutout, inaczej prostokąt)
   const px = cx + game.playerX;
-  const groundY = h * 0.85;
-  const py = groundY - game.jumpY * 2.2;
-  const bodyH = game.isCrouching ? 60 : 100;
+  const groundY = h * 0.86;
+  const py = groundY - game.jumpY * 2.8;
+  const bodyH = game.isCrouching ? 70 : 120;
 
   gctx.save();
   gctx.translate(px, py);
-  gctx.fillStyle = 'rgba(0,0,0,0.4)';
+
+  // Cień
+  gctx.fillStyle = 'rgba(0,0,0,.4)';
   gctx.beginPath();
-  gctx.ellipse(0, groundY - py + 8, 30, 8, 0, 0, Math.PI * 2);
+  gctx.ellipse(0, groundY - py + 10, 38, 10, 0, 0, Math.PI * 2);
   gctx.fill();
 
+  // Sylwetka gracza
   gctx.fillStyle = '#3ddc97';
   gctx.beginPath();
-  gctx.roundRect(-22, -bodyH, 44, bodyH, 14);
+  gctx.roundRect(-26, -bodyH, 52, bodyH, 16);
   gctx.fill();
   gctx.beginPath();
-  gctx.arc(0, -bodyH - 18, 18, 0, Math.PI * 2);
+  gctx.arc(0, -bodyH - 22, 22, 0, Math.PI * 2);
   gctx.fill();
   gctx.restore();
 }
 
-// ---------- Podgląd: osoba bez tła na miniaturze gry ----------
+// ===== PODGLĄD: osoba bez tła na tle gry =====
 function drawPreview() {
   const w = previewCanvas.width, h = previewCanvas.height;
   pctx.drawImage(gameCanvas, 0, 0, gameCanvas.width, gameCanvas.height, 0, 0, w, h);
-  pctx.fillStyle = 'rgba(0,0,0,0.15)';
+  pctx.fillStyle = 'rgba(0,0,0,.18)';
   pctx.fillRect(0, 0, w, h);
 
   if (cutoutReady && cutoutImg.width) {
@@ -262,15 +321,13 @@ function drawPreview() {
   }
 }
 
-// ---------- Pętla renderowania ----------
+// ===== PĘTLA =====
 function loop() {
   requestAnimationFrame(loop);
   updateGame();
   drawGame();
   drawPreview();
 }
-
-restartBtn.addEventListener('click', () => resetGame());
 
 resetGame();
 loop();
